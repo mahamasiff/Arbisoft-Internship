@@ -1,4 +1,4 @@
-# Prompting Log 
+# Prompting Log - Maham Asif
 
 ## Environment Setup
 * **Prompt:** "Initialize a uv project with numpy, pandas, scikit-learn, pytest, and ruff."
