@@ -4,9 +4,17 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
+    "chromadb>=1.5.9",
+    "google-genai>=2.12.0",
     "matplotlib>=3.11.0",
     "numpy>=2.5.0",
+    "ollama>=0.6.2",
+    "openai>=2.45.0",
     "pandas>=3.0.3",
+    "pydantic>=2.13.4",
+    "pymupdf>=1.28.0",
+    "python-dotenv>=1.2.2",
+    "rich>=15.0.0",
     "scikit-learn>=1.9.0",
     "seaborn>=0.13.2",
 ]

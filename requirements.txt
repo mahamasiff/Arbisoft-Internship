@@ -1,0 +1,21 @@
+# Core (week1)
+matplotlib>=3.11.0
+numpy>=2.5.0
+pandas>=3.0.3
+scikit-learn>=1.9.0
+seaborn>=0.13.2
+
+# week2 — OpenRouter chat/model comparison
+openai>=2.45.0
+python-dotenv>=1.2.2
+
+# week3 — RAG pipeline (PDF extraction, vector DB, structured output)
+chromadb>=1.5.9
+google-genai>=2.12.0
+ollama>=0.6.2
+pydantic>=2.13.4
+pymupdf>=1.28.0
+
+# dev / test
+pytest>=9.1.1
+ruff>=0.15.19

@@ -8,3 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+
+.env
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Generated data (week3 RAG pipeline)
+week3/chromadb/
+week3/outputs/
