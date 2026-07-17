@@ -54,3 +54,12 @@
 - **Prompt:** "Run the existing RAG pipeline (main.py + pipeline.py) against live queries to find real cases where the LLM hallucinates, not hypothetical ones."
 - **Model:** Claude Code
 - **Outcome:** Confirmed the pipeline's pydantic validation only catches structural breaks — it's blind to factually fabricated content that happens to be well-typed.
+
+## Week 4 
+
+### Planning research agent flow
+- **Prompt** I want to add my SerpAPI key to implement a research agent with a web-search skill in the existing week4/main.py setup. Tell me the flow of how i should go about it but do not write any code yet
+- **outcome:** Proposed a web_search tool wrapping SerpApi, bound to the existing Gemini LLM, with a choice between a prebuilt create_react_agent or a manual StateGraph
+
+### Implementing web search tool
+- **prompt:** 
