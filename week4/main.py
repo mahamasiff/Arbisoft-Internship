@@ -1,10 +1,12 @@
 import os
 from typing import Annotated, Sequence, TypedDict
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -83,7 +85,7 @@ graph.add_conditional_edges(
 )
 graph.add_edge("tools", "agent")
 
-app = graph.compile()
+app = graph.compile(checkpointer=MemorySaver())
 
 
 def extract_text(content: str | list) -> str:
@@ -100,21 +102,23 @@ def extract_text(content: str | list) -> str:
     )
 
 
-def research(question: str) -> str:
+SYSTEM_PROMPT = SystemMessage(
+    content=(
+        "You are a research agent. Use the web_search tool to "
+        "find current, accurate information before answering. "
+        "Cite sources by URL when you use them."
+    )
+)
+
+
+def research(question: str, config: dict, first_turn: bool) -> str:
+    messages = [HumanMessage(content=question)]
+    if first_turn:
+        messages.insert(0, SYSTEM_PROMPT)
+
     result = app.invoke(
-        {
-            "messages": [
-                SystemMessage(
-                    content=(
-                        "You are a research agent. Use the web_search tool to "
-                        "find current, accurate information before answering. "
-                        "Cite sources by URL when you use them."
-                    )
-                ),
-                HumanMessage(content=question),
-            ],
-            "number_of_steps": 0,
-        }
+        {"messages": messages, "number_of_steps": 0},
+        config=config,
     )
     return extract_text(result["messages"][-1].content)
 
@@ -127,6 +131,23 @@ if __name__ == "__main__":
         print("Error: SERP_API_KEY not set.")
         raise SystemExit(1)
 
-    question = input("Research question: ").strip()
-    answer = research(question)
-    print(f"\n{answer}")
+    config = {"configurable": {"thread_id": str(uuid4())}}
+    print("Ask a research question. Type 'exit' or 'quit' to stop.\n")
+
+    first_turn = True
+    while True:
+        try:
+            question = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+
+        if not question:
+            continue
+        if question.lower() in ("exit", "quit"):
+            print("Goodbye!")
+            break
+
+        answer = research(question, config, first_turn)
+        first_turn = False
+        print(f"\n{answer}\n")
