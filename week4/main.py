@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import fitz
 import trafilatura
 from dotenv import load_dotenv
 from langchain_core.callbacks import BaseCallbackHandler
@@ -76,7 +77,33 @@ def fetch_page(url: str) -> str:
     return text
 
 
-tools = [web_search, fetch_page]
+@tool
+def read_file(path: str) -> str:
+    """Read a local .txt or .pdf file and return its text content.
+
+    Use this when the user references a local file they want you to look
+    at, rather than a web page.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        return f"Could not find file: {path}"
+
+    suffix = file_path.suffix.lower()
+    if suffix == ".txt":
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    elif suffix == ".pdf":
+        doc = fitz.open(file_path)
+        text = "".join(page.get_text() for page in doc)
+    else:
+        return f"Unsupported file type '{suffix}'. Only .txt and .pdf are supported."
+
+    if len(text) > MAX_PAGE_CHARS:
+        text = text[:MAX_PAGE_CHARS] + "\n[...truncated]"
+
+    return text
+
+
+tools = [web_search, fetch_page, read_file]
 
 
 class ToolLoggingHandler(BaseCallbackHandler):
@@ -198,6 +225,8 @@ SYSTEM_PROMPT = SystemMessage(
     content=(
         "You are a research agent. Use the web_search tool to find relevant "
         "pages, then use the fetch_page tool to read the full content of the most relevant result(s) and do not answer from search snippets alone. "
+        "If the user references a local file, use the read_file tool to read "
+        "it (.txt and .pdf supported) instead of searching the web. "
         "Base your answer only on what you actually found. "
         "Cite sources using markdown links with a short descriptive name as the link text, e.g. [IBM](https://...) "
         "never paste a raw URL inline. "
