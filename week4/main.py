@@ -86,6 +86,20 @@ graph.add_edge("tools", "agent")
 app = graph.compile()
 
 
+def extract_text(content: str | list) -> str:
+    """Gemini can return content as plain text or a list of content blocks
+    (text plus internal grounding metadata like a 'signature'); keep only
+    the text.
+    """
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
 def research(question: str) -> str:
     result = app.invoke(
         {
@@ -102,15 +116,15 @@ def research(question: str) -> str:
             "number_of_steps": 0,
         }
     )
-    return result["messages"][-1].content
+    return extract_text(result["messages"][-1].content)
 
 
 if __name__ == "__main__":
     if not os.getenv("GOOGLE_API_KEY"):
-        print("Error: GOOGLE_API_KEY not set in environment or .env file.")
+        print("Error: GOOGLE_API_KEY not set")
         raise SystemExit(1)
     if not os.getenv("SERP_API_KEY"):
-        print("Error: SERP_API_KEY not set in environment or .env file.")
+        print("Error: SERP_API_KEY not set.")
         raise SystemExit(1)
 
     question = input("Research question: ").strip()
