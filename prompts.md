@@ -62,4 +62,27 @@
 - **outcome:** Proposed a web_search tool wrapping SerpApi, bound to the existing Gemini LLM, with a choice between a prebuilt create_react_agent or a manual StateGraph
 
 ### Implementing web search tool
-- **prompt:** 
+- **prompt:** use the manual stategraph approach with an agent node and a tools node 
+- **outcome:** built a StateGraph with an agent node and a tools node connected by a conditional edge that loops back while the LLM keeps requesting tool calls (capped at MAX_STEPS), plus a research() entry point.
+
+### Returning clean answer
+- **prompt:** the answer from the model is not returned as plain text can you suggest atweak to make sure it returns a plain string. 
+- **outcome:** newer langchain-google-genai returns .content as a list of content blocks (text + an internal signature used for grounding continuity) instead of a plain string, and research() was printing that raw structure. Added extract_text() to pull just the text field(s) out, handling both the old plain-string case and the new block-list case. Confirmed with a live run: clean answer, no metadata.
+
+### Adding fetch page tool
+
+- **prompt:** Add a fetch-page tool that lets the agent extract the actual content of a URL and answer based on what it finds. The agent should also cite its sources.
+- **outcome:** Added fetch_page(url), a @tool-decorated function using trafilatura to download a URL and extract its main readable text (nav/ads/boilerplate stripped), truncated to MAX_PAGE_CHARS to avoid blowing up the context on large pages. Registered it alongside web_search in tools and updated system prompt to always cite the specfic source URL.
+
+### Debugging mslformed answer output
+
+- **prompt:** After asking a question the output onlt shows the tool call logs and stops. what are the possible reasons for this?
+- **outcome:** Root cause: hitting MAX_STEPS mid-loop forced the graph to end on whatever the LLM's last message happened to be — which was itself a pending tool-call request with empty .content, not an answer. Fixed by raising MAX_STEPS (6 → 10) and adding a finalize node
+
+### Adding file reading tool
+- **prompt:** Add a file-read plugin: the agent should be able to read .txt and .pdf files. Implement it as a new read_file(path) tool alongside web_search and fetch_page. use fitz for PDFs and a plain text read for .txt. Return an error string instead of raising for missing files or unsupported extensions, and cap the length with the existing MAX_PAGE_CHARS truncation, same as fetch_page. Wire it into tools and add a line to SYSTEM_PROMPT so the agent knows it can use it. Don't restrict which paths it can read and make it a local personal tool so allow any path on disk
+- **outcome:** 
+.txt — reads correctly.
+.pdf — extracted via fitz, correctly truncated at MAX_PAGE_CHARS with the [...truncated] marker.
+Missing file — returns "Could not find file: does_not_exist.txt" instead of crashing.
+Unsupported extension — returns "Unsupported file type '.docx'. Only .txt and .pdf are supported." instead of crashing.

@@ -10,6 +10,7 @@ self-contained assignment.
 - [Week 1 — MNIST Classification with SVM](#week-1--mnist-classification-with-svm)
 - [Week 2 — OpenRouter Models Comparison](#week-2--openrouter-models-comparison)
 - [Week 3 — RAG, Vector DBs, Structured Outputs & Validation](#week-3--rag-vector-dbs-structured-outputs--validation)
+- [Week 4 — Multi-Tool Research Agent (LangGraph)](#week-4--multi-tool-research-agent-langgraph)
 - [Linting](#linting)
 
 ## Folder Structure
@@ -19,6 +20,7 @@ self-contained assignment.
 ├── pyproject.toml         # dependencies for all weeks
 ├── requirements.txt       # flat pip-installable equivalent
 ├── uv.lock
+├── constants.py             # shared rich.Theme (colors), reusable across weeks
 ├── prompts.md              # prompting log (all weeks)
 │
 ├── week1/                  # MNIST classification with SVM
@@ -30,13 +32,18 @@ self-contained assignment.
 │   ├── models.ipynb            # side-by-side model comparison notebook
 │   └── image.png, image-1.png  # screenshots referenced below
 │
-└── week3/                  # Local RAG pipeline, vector DBs, structured output
-    ├── main.py                 # RAG orchestration (extraction, embedding, retrieval)
-    ├── pipeline.py              # schema, validation, persistence
-    ├── conftest.py              # lets pytest resolve `pipeline` when run from repo root
-    ├── pdf_collection/          # source PDFs used for the RAG corpus
-    └── tests/
-        └── test_pipeline.py     # pytest unit tests for pipeline.py
+├── week3/                  # Local RAG pipeline, vector DBs, structured output
+│   ├── main.py                 # RAG orchestration (extraction, embedding, retrieval)
+│   ├── pipeline.py              # schema, validation, persistence
+│   ├── conftest.py              # lets pytest resolve `pipeline` when run from repo root
+│   ├── pdf_collection/          # source PDFs used for the RAG corpus
+│   └── tests/
+│       └── test_pipeline.py     # pytest unit tests for pipeline.py
+│
+└── week4/                  # LangGraph research agent: search, page/file reading, memory
+    ├── main.py                  # agent graph, tools, logging hook, chat loop
+    ├── cats.txt                  # local-file demo source (cats in ancient Egypt)
+    └── cat1.png, cat2.png, image.png  # demo screenshots referenced below
 ```
 
 ## Setup
@@ -327,6 +334,83 @@ Across every successful validation in this test run — including an otherwise-c
 summary of multi-head attention — `source_context_used` was a paraphrase or a
 citation-style label, never a literal excerpt of the retrieved chunks. Nothing in the
 schema requires verbatim quoting, so this passes silently every time.
+
+## Week 4 — Multi-Tool Research Agent (LangGraph)
+
+A single LangGraph agent that answers multi-hop research questions by
+combining live web search, full-page reading, local file reading, and
+in-session memory — with every tool call logged to the console with a
+timestamp.
+
+**Setup:** add `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) and `SERP_API_KEY` to `.env`.
+
+**Run it:**
+
+    cd week4
+    uv run main.py
+
+Then just chat — ask a question, get an answer, ask a follow-up. Type
+`exit` or `quit` to stop.
+
+### Tools
+
+| Tool | What it does |
+|---|---|
+| `web_search` | Queries Google via SerpApi and returns the top 5 organic results (title, snippet, link). |
+| `fetch_page` | Downloads a specific URL and extracts its main readable text via `trafilatura`, so the agent can read a full page instead of just a search snippet. |
+| `read_file` | Reads a local `.txt` or `.pdf` file (PDF text extracted via `fitz`/PyMuPDF), so the agent can answer from a document the user provides, not just the web. |
+
+All three are capped at `MAX_PAGE_CHARS` (8000 characters) so a large page
+or file can't blow up the model's context.
+
+### Flow
+
+```
+question
+  -> agent node (LLM decides: answer now, or call a tool?)
+       -> tool call, under step cap  -> tools node (web_search / fetch_page / read_file)
+             -> back to agent node
+       -> tool call, at step cap     -> finalize node (same LLM, tools unbound,
+             forced to answer with whatever was already gathered)
+       -> no tool call                -> END
+```
+
+- **Memory:** the graph is compiled with a `MemorySaver` checkpointer, keyed
+  by a `thread_id` generated once per script run. Each turn only sends the
+  new message — LangGraph automatically threads in the full prior
+  conversation, so follow-ups ("what did I just ask?") are answered from
+  memory alone, with no tool call at all.
+- **Tool-call logging hook:** a `BaseCallbackHandler` subclass
+  (`ToolLoggingHandler`) hooks into `on_tool_start` / `on_tool_end` /
+  `on_tool_error` and prints a timestamped, colored line — colors sourced
+  from the shared root [constants.py](constants.py) — for every tool call
+  automatically, with no per-tool logging code.
+- **Step cap:** `MAX_STEPS` limits how many agent-to-tools round-trips one
+  question can take, so a confused agent can't loop indefinitely burning
+  API/search quota.
+
+### Demo
+
+Multi-hop demo built around [cats.txt](week4/cats.txt) (a long-form text on
+the history of cats in ancient Egypt), testing `read_file` and memory
+together:
+
+1. **`read_file` only** — *"Read cats.txt and tell me what the ancient
+   Egyptians called cats, and how the goddess Bastet's appearance changed
+   over time."* Answered entirely from the local file.
+
+   ![read_file demo](week4/cat1.png)
+
+2. **Memory, no tool call** — *"Which god was associated with cats before
+   Bastet became dominant?"* Answered from conversation memory alone — no
+   new tool call is logged.
+
+   ![memory demo](week4/cat2.png)
+
+An earlier pipeline test showing `web_search` + `fetch_page` + the logging
+hook + colored, clickable citation links together, on a different topic:
+
+   ![web_search + fetch_page demo](week4/image.png)
 
 ## Linting
 
