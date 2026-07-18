@@ -1,8 +1,16 @@
 import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Sequence, TypedDict
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import trafilatura
 from dotenv import load_dotenv
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -10,11 +18,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from rich.console import Console
+from rich.markdown import Markdown
 from serpapi import GoogleSearch
+
+from constants import THEME
 
 load_dotenv()
 
-MAX_STEPS = 6
+console = Console(theme=THEME)
+
+MAX_STEPS = 10
+MAX_PAGE_CHARS = 8000
 
 
 @tool
@@ -24,7 +39,7 @@ def web_search(query: str) -> str:
     """
     api_key = os.getenv("SERP_API_KEY")
     if not api_key:
-        raise RuntimeError("SERP_API_KEY not set in environment or .env file.")
+        raise RuntimeError("SERP_API_KEY not set")
 
     search = GoogleSearch({"q": query, "api_key": api_key, "num": 5})
     results = search.get_dict()
@@ -39,7 +54,64 @@ def web_search(query: str) -> str:
     )
 
 
-tools = [web_search]
+@tool
+def fetch_page(url: str) -> str:
+    """Fetch a URL and extract its main readable text content.
+
+    Use this after web_search, on the most relevant result(s), to read the
+    actual page content before answering instead of relying on the search
+    snippet alone.
+    """
+    downloaded = trafilatura.fetch_url(url)
+    if downloaded is None:
+        return f"Could not fetch {url}."
+
+    text = trafilatura.extract(downloaded)
+    if not text:
+        return f"Could not extract readable content from {url}."
+
+    if len(text) > MAX_PAGE_CHARS:
+        text = text[:MAX_PAGE_CHARS] + "\n[...truncated]"
+
+    return text
+
+
+tools = [web_search, fetch_page]
+
+
+class ToolLoggingHandler(BaseCallbackHandler):
+    """Logs every tool call to the console with a timestamp."""
+
+    def __init__(self, console: Console) -> None:
+        self.console = console
+        self._calls: dict[UUID, tuple[str, float]] = {}
+
+    def _timestamp(self) -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def on_tool_start(
+        self, serialized: dict, input_str: str, *, run_id: UUID, **kwargs
+    ) -> None:
+        name = serialized.get("name", "tool")
+        self._calls[run_id] = (name, time.monotonic())
+        self.console.print(
+            f"[info]{self._timestamp()}[/info] [tool]-> {name}[/tool] "
+            f"called with: {input_str}"
+        )
+
+    def on_tool_end(self, output, *, run_id: UUID, **kwargs) -> None:
+        name, start = self._calls.pop(run_id, ("tool", time.monotonic()))
+        duration = time.monotonic() - start
+        self.console.print(
+            f"[info]{self._timestamp()}[/info] [tool]<- {name}[/tool] "
+            f"finished in {duration:.2f}s"
+        )
+
+    def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs) -> None:
+        name, _ = self._calls.pop(run_id, ("tool", time.monotonic()))
+        self.console.print(
+            f"[info]{self._timestamp()}[/info] [error]x {name} failed:[/error] {error}"
+        )
 
 
 class AgentState(TypedDict):
@@ -49,12 +121,20 @@ class AgentState(TypedDict):
     number_of_steps: int
 
 
-llm = ChatGoogleGenerativeAI(
+base_llm = ChatGoogleGenerativeAI(
     model="gemini-3.5-flash",
     temperature=0,
     max_retries=2,
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
-).bind_tools(tools)
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+)
+llm = base_llm.bind_tools(tools)
+
+FINALIZE_NUDGE = HumanMessage(
+    content=(
+        "Stop searching now and answer with the information you've already "
+        "gathered, even if incomplete."
+    )
+)
 
 
 def agent_node(state: AgentState) -> AgentState:
@@ -65,25 +145,37 @@ def agent_node(state: AgentState) -> AgentState:
     }
 
 
+def finalize_node(state: AgentState) -> AgentState:
+    # No tools bound here, so this call is guaranteed to return real text
+    # instead of another tool-call request.
+    response = base_llm.invoke([*state["messages"], FINALIZE_NUDGE])
+    return {
+        "messages": [response],
+        "number_of_steps": state["number_of_steps"] + 1,
+    }
+
+
 def should_continue(state: AgentState) -> str:
-    if state["number_of_steps"] >= MAX_STEPS:
-        return "end"
     last_message = state["messages"][-1]
-    if getattr(last_message, "tool_calls", None):
-        return "continue"
-    return "end"
+    has_tool_calls = bool(getattr(last_message, "tool_calls", None))
+
+    if state["number_of_steps"] >= MAX_STEPS:
+        return "finalize" if has_tool_calls else "end"
+    return "continue" if has_tool_calls else "end"
 
 
 graph = StateGraph(AgentState)
 graph.add_node("agent", agent_node)
 graph.add_node("tools", ToolNode(tools))
+graph.add_node("finalize", finalize_node)
 graph.set_entry_point("agent")
 graph.add_conditional_edges(
     "agent",
     should_continue,
-    {"continue": "tools", "end": END},
+    {"continue": "tools", "finalize": "finalize", "end": END},
 )
 graph.add_edge("tools", "agent")
+graph.add_edge("finalize", END)
 
 app = graph.compile(checkpointer=MemorySaver())
 
@@ -104,9 +196,12 @@ def extract_text(content: str | list) -> str:
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
-        "You are a research agent. Use the web_search tool to "
-        "find current, accurate information before answering. "
-        "Cite sources by URL when you use them."
+        "You are a research agent. Use the web_search tool to find relevant "
+        "pages, then use the fetch_page tool to read the full content of the most relevant result(s) and do not answer from search snippets alone. "
+        "Base your answer only on what you actually found. "
+        "Cite sources using markdown links with a short descriptive name as the link text, e.g. [IBM](https://...) "
+        "never paste a raw URL inline. "
+        "Cite once per paragraph or section, not after every sentence."
     )
 )
 
@@ -131,7 +226,10 @@ if __name__ == "__main__":
         print("Error: SERP_API_KEY not set.")
         raise SystemExit(1)
 
-    config = {"configurable": {"thread_id": str(uuid4())}}
+    config = {
+        "configurable": {"thread_id": str(uuid4())},
+        "callbacks": [ToolLoggingHandler(console)],
+    }
     print("Ask a research question. Type 'exit' or 'quit' to stop.\n")
 
     first_turn = True
@@ -150,4 +248,6 @@ if __name__ == "__main__":
 
         answer = research(question, config, first_turn)
         first_turn = False
-        print(f"\n{answer}\n")
+        console.print()
+        console.print(Markdown(answer))
+        console.print()
