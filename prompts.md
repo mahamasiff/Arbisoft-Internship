@@ -86,3 +86,11 @@
 .pdf — extracted via fitz, correctly truncated at MAX_PAGE_CHARS with the [...truncated] marker.
 Missing file — returns "Could not find file: does_not_exist.txt" instead of crashing.
 Unsupported extension — returns "Unsupported file type '.docx'. Only .txt and .pdf are supported." instead of crashing.
+
+## Week 5
+
+### Fixing agent routing error
+- **prompt:** Help me understand and fix this error: "......... line 222, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)......."
+
+- **outcome:** the crash was from passing the live mcp.ClientSession directly as a tool — the SDK deep-copies the config, and a live session holds asyncio.Future objects that can't be deep-copied (that "experimental" MCP-session-as-tool path is fragile)Replace it with a plain async wrapper function, calculate_cat_to_human_age, that calls mcp_client.call_tool(...) internally and returns .data. Plain functions are copy-safe (Python's copy module treats them as atomic/identity), and google-genai's automatic function calling handles regular callables natively 

@@ -11,6 +11,7 @@ self-contained assignment.
 - [Week 2 — OpenRouter Models Comparison](#week-2--openrouter-models-comparison)
 - [Week 3 — RAG, Vector DBs, Structured Outputs & Validation](#week-3--rag-vector-dbs-structured-outputs--validation)
 - [Week 4 — Multi-Tool Research Agent (LangGraph)](#week-4--multi-tool-research-agent-langgraph)
+- [Week 5 — MCP and Multi Agent Orchestration](#week-5--mcp-and-multi-agent-orchestration)
 - [Linting](#linting)
 
 ## Folder Structure
@@ -411,6 +412,8 @@ An earlier pipeline test showing `web_search` + `fetch_page` + the logging
 hook + colored, clickable citation links together, on a different topic:
 
    ![web_search + fetch_page demo](week4/image.png)
+
+## Week 5 — MCP and Multi Agent Orchestration
 
 ## Linting
 
